@@ -1,0 +1,556 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEON SHIFT - Trò chơi 2D</title>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #070b1c;
+    color: white;
+    font-family: Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 15px;
+}
+
+.game {
+    width: 900px;
+    max-width: 100%;
+    text-align: center;
+}
+
+h1 {
+    font-size: clamp(28px, 5vw, 48px);
+    color: #00f5ff;
+    letter-spacing: 5px;
+    text-shadow: 0 0 20px #00f5ff;
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    color: #a8b6d8;
+    margin-bottom: 18px;
+}
+
+.hud {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    color: #00f5ff;
+    font-weight: bold;
+}
+
+canvas {
+    width: 100%;
+    display: block;
+    border: 2px solid #00d9ff;
+    border-radius: 12px;
+    background: #0b1026;
+    box-shadow: 0 0 25px #00c8ff40;
+    touch-action: manipulation;
+}
+
+.controls {
+    margin-top: 15px;
+    line-height: 2;
+    color: #c6d4f5;
+    font-size: 14px;
+}
+
+button {
+    margin: 8px 5px;
+    padding: 12px 24px;
+    border: 1px solid #00f5ff;
+    border-radius: 8px;
+    color: #07101f;
+    background: #00f5ff;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+button:hover {
+    background: white;
+    box-shadow: 0 0 20px #00f5ff;
+    transform: translateY(-2px);
+}
+
+#message {
+    color: #ffe66d;
+    min-height: 22px;
+    margin-top: 8px;
+}
+</style>
+</head>
+
+<body>
+<div class="game">
+
+    <h1>NEON SHIFT</h1>
+    <p class="subtitle">Đảo chiều trọng lực - Phá vỡ giới hạn!</p>
+
+    <div class="hud">
+        <span>ĐIỂM: <span id="score">0</span></span>
+        <span>NĂNG LƯỢNG: <span id="energy">0</span></span>
+        <span>KỶ LỤC: <span id="best">0</span></span>
+    </div>
+
+    <canvas id="canvas" width="900" height="450"></canvas>
+
+    <div id="message">Sẵn sàng khám phá thế giới đảo chiều?</div>
+
+    <button id="startBtn">BẮT ĐẦU / CHƠI LẠI</button>
+    <button id="shiftBtn">ĐẢO TRỌNG LỰC</button>
+
+    <div class="controls">
+        <b>SPACE / W / ↑:</b> Đảo trọng lực
+        &nbsp; | &nbsp;
+        <b>R:</b> Chơi lại
+        <br>
+        Né gai, thu thập năng lượng và sống sót càng lâu càng tốt!
+    </div>
+
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const scoreText = document.getElementById("score");
+const energyText = document.getElementById("energy");
+const bestText = document.getElementById("best");
+const message = document.getElementById("message");
+
+const W = canvas.width;
+const H = canvas.height;
+const floorY = H - 35;
+const ceilY = 35;
+
+let player, obstacles, orbs, particles;
+let score = 0;
+let energy = 0;
+let speed = 4;
+let gravityDir = 1;
+let frame = 0;
+let running = false;
+let gameOver = false;
+let best = 0;
+let spawnTimer = 0;
+let orbTimer = 0;
+
+try {
+    best = Number(localStorage.getItem("neonBest")) || 0;
+} catch (e) {}
+bestText.textContent = best;
+
+function resetGame() {
+    player = {
+        x: 120,
+        y: floorY - 32,
+        size: 32,
+        vy: 0
+    };
+
+    obstacles = [];
+    orbs = [];
+    particles = [];
+
+    score = 0;
+    energy = 0;
+    speed = 4;
+    gravityDir = 1;
+    frame = 0;
+    spawnTimer = 50;
+    orbTimer = 100;
+    running = true;
+    gameOver = false;
+
+    scoreText.textContent = 0;
+    energyText.textContent = 0;
+    message.textContent = "Đi thôi! Hãy làm chủ trọng lực!";
+}
+
+function shiftGravity() {
+    if (!running || gameOver) return;
+
+    gravityDir *= -1;
+    player.vy = gravityDir * 2;
+
+    for (let i = 0; i < 12; i++) {
+        particles.push({
+            x: player.x + 16,
+            y: player.y + 16,
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6,
+            life: 25,
+            color: "#00f5ff"
+        });
+    }
+}
+
+function spawnObstacle() {
+    const fromTop = Math.random() < 0.5;
+    const width = 28 + Math.random() * 24;
+    const height = 30 + Math.random() * 45;
+
+    obstacles.push({
+        x: W + 20,
+        y: fromTop ? ceilY : floorY - height,
+        w: width,
+        h: height,
+        top: fromTop
+    });
+}
+
+function spawnOrb() {
+    orbs.push({
+        x: W + 20,
+        y: 90 + Math.random() * (H - 180),
+        r: 10,
+        phase: Math.random() * 6
+    });
+}
+
+function collide(a, b) {
+    return a.x < b.x + b.w &&
+           a.x + a.w > b.x &&
+           a.y < b.y + b.h &&
+           a.y + a.h > b.y;
+}
+
+function endGame() {
+    running = false;
+    gameOver = true;
+    message.textContent =
+        "GAME OVER! Điểm của bạn: " + Math.floor(score)
+        + " — Nhấn R để thử lại.";
+
+    if (score > best) {
+        best = Math.floor(score);
+        bestText.textContent = best;
+        try {
+            localStorage.setItem("neonBest", best);
+        } catch (e) {}
+    }
+}
+
+function update() {
+    if (!running) return;
+
+    frame++;
+    score += 0.12;
+    speed = Math.min(9, 4 + score / 120);
+
+    scoreText.textContent = Math.floor(score);
+
+    // Chuyển động nhân vật
+    player.vy += 0.42 * gravityDir;
+    player.vy = Math.max(-9, Math.min(9, player.vy));
+    player.y += player.vy;
+
+    // Va chạm trần và sàn
+    if (player.y < ceilY) {
+        player.y = ceilY;
+        player.vy = 0;
+    }
+
+    if (player.y + player.size > floorY) {
+        player.y = floorY - player.size;
+        player.vy = 0;
+    }
+
+    // Sinh chướng ngại vật
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+        spawnObstacle();
+        spawnTimer = Math.max(48, 90 - speed * 4)
+                    + Math.random() * 35;
+    }
+
+    // Sinh vật phẩm
+    orbTimer--;
+    if (orbTimer <= 0) {
+        spawnOrb();
+        orbTimer = 100 + Math.random() * 100;
+    }
+
+    // Di chuyển chướng ngại vật
+    for (const o of obstacles) {
+        o.x -= speed;
+
+        if (collide(
+            {x: player.x + 4, y: player.y + 4,
+             w: player.size - 8, h: player.size - 8},
+            o
+        )) {
+            endGame();
+            return;
+        }
+    }
+
+    obstacles = obstacles.filter(o => o.x + o.w > 0);
+
+    // Thu thập năng lượng
+    for (const orb of orbs) {
+        orb.x -= speed;
+        orb.phase += 0.08;
+
+        const dx = player.x + 16 - orb.x;
+        const dy = player.y + 16 - orb.y;
+
+        if (Math.hypot(dx, dy) < 25) {
+            orb.collected = true;
+            energy++;
+            score += 10;
+            energyText.textContent = energy;
+
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x: orb.x,
+                    y: orb.y,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 25,
+                    color: "#ffe66d"
+                });
+            }
+        }
+    }
+
+    orbs = orbs.filter(o => !o.collected && o.x > -20);
+
+    // Hiệu ứng hạt
+    for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+    }
+
+    particles = particles.filter(p => p.life > 0);
+}
+
+function drawBackground() {
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, "#10163a");
+    gradient.addColorStop(1, "#070b1c");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Sao chuyển động
+    for (let i = 0; i < 55; i++) {
+        const x = (i * 173 - frame * (0.3 + (i % 3) * 0.2)
+                   + W * 10) % W;
+        const y = (i * 67) % H;
+
+        ctx.fillStyle = "#91bfff";
+        ctx.globalAlpha = 0.3 + (i % 4) * 0.15;
+        ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // Lưới không gian
+    ctx.strokeStyle = "#27345d";
+    ctx.lineWidth = 1;
+
+    for (let x = 0; x < W; x += 45) {
+        ctx.beginPath();
+        ctx.moveTo(x, ceilY);
+        ctx.lineTo(x, floorY);
+        ctx.stroke();
+    }
+
+    // Trần và sàn
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = "#00f5ff";
+    ctx.fillStyle = "#00d9ff";
+    ctx.fillRect(0, 0, W, ceilY);
+    ctx.fillRect(0, floorY, W, H - floorY);
+    ctx.shadowBlur = 0;
+}
+
+function drawPlayer() {
+    ctx.save();
+
+    ctx.shadowColor = "#00f5ff";
+    ctx.shadowBlur = 20;
+
+    ctx.fillStyle = "#00f5ff";
+    ctx.fillRect(
+        player.x, player.y,
+        player.size, player.size
+    );
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#102044";
+    ctx.fillRect(player.x + 7, player.y + 7, 18, 18);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(player.x + 11, player.y + 10, 5, 5);
+    ctx.fillRect(player.x + 20, player.y + 10, 5, 5);
+
+    ctx.restore();
+}
+
+function drawObstacles() {
+    for (const o of obstacles) {
+        ctx.save();
+        ctx.shadowColor = "#ff3864";
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = "#ff3864";
+
+        // Gai tam giác
+        ctx.beginPath();
+
+        if (o.top) {
+            ctx.moveTo(o.x, o.y);
+            ctx.lineTo(o.x + o.w / 2, o.y + o.h);
+            ctx.lineTo(o.x + o.w, o.y);
+        } else {
+            ctx.moveTo(o.x, o.y + o.h);
+            ctx.lineTo(o.x + o.w / 2, o.y);
+            ctx.lineTo(o.x + o.w, o.y + o.h);
+        }
+
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawOrbs() {
+    for (const o of orbs) {
+        const pulse = Math.sin(o.phase) * 3;
+
+        ctx.save();
+        ctx.shadowColor = "#ffe66d";
+        ctx.shadowBlur = 20;
+        ctx.strokeStyle = "#ffe66d";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.r + pulse, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#fff7bc";
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawParticles() {
+    for (const p of particles) {
+        ctx.globalAlpha = p.life / 25;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 4, 4);
+    }
+
+    ctx.globalAlpha = 1;
+}
+
+function drawOverlay() {
+    if (!running && !gameOver) {
+        ctx.fillStyle = "#07101fcc";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#00f5ff";
+        ctx.font = "bold 38px Arial";
+        ctx.fillText("NEON SHIFT", W / 2, H / 2 - 35);
+
+        ctx.fillStyle = "white";
+        ctx.font = "18px Arial";
+        ctx.fillText("Nhấn BẮT ĐẦU để chơi", W / 2, H / 2 + 10);
+        ctx.fillText("Đảo trọng lực để né gai!", W / 2, H / 2 + 42);
+    }
+
+    if (gameOver) {
+        ctx.fillStyle = "#07101fcc";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ff3864";
+        ctx.font = "bold 42px Arial";
+        ctx.fillText("GAME OVER", W / 2, H / 2 - 20);
+
+        ctx.fillStyle = "white";
+        ctx.font = "20px Arial";
+        ctx.fillText(
+            "Điểm: " + Math.floor(score) +
+            " | Năng lượng: " + energy,
+            W / 2, H / 2 + 20
+        );
+
+        ctx.fillStyle = "#00f5ff";
+        ctx.font = "17px Arial";
+        ctx.fillText("Nhấn R để chơi lại", W / 2, H / 2 + 55);
+    }
+}
+
+function draw() {
+    drawBackground();
+
+    if (player) {
+        drawOrbs();
+        drawObstacles();
+        drawPlayer();
+        drawParticles();
+    }
+
+    drawOverlay();
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+document.getElementById("startBtn").addEventListener("click", resetGame);
+document.getElementById("shiftBtn").addEventListener("click", shiftGravity);
+
+document.addEventListener("keydown", function(e) {
+    if (["Space", "ArrowUp", "KeyW"].includes(e.code)) {
+        e.preventDefault();
+
+        if (e.repeat) return;
+
+        if (!running && !gameOver) {
+            resetGame();
+        } else {
+            shiftGravity();
+        }
+    }
+
+    if (e.code === "KeyR") {
+        resetGame();
+    }
+});
+
+canvas.addEventListener("pointerdown", function() {
+    if (running) {
+        shiftGravity();
+    }
+});
+
+resetGame();
+running = false;
+draw();
+loop();
+</script>
+</body>
+</html>
